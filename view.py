@@ -1623,5 +1623,44 @@ def painel_admin():
         'filmes_mais_bilheteira': filmes_lista
     })
 
+@app.route('/gerar_pdf_painel', methods=['GET'])
+def gerar_pdf_painel():
+    cursor = con.cursor()
+    cursor.execute("""
+                    SELECT f.titulo, s.DATA_SESSAO, s.horario, COUNT(ar.id_reserva) AS ingressos
+                      FROM sessoes s
+                      LEFT JOIN filmes f ON s.id_filme = f.id_filme
+                      LEFT JOIN RESERVA r ON r.ID_SESSAO = s.ID_SESSAO 
+                      LEFT JOIN assentos_reservados ar ON ar.ID_RESERVA = r.ID_RESERVA 
+                     GROUP BY f.titulo, s.DATA_SESSAO, s.horario
+                    HAVING COUNT(ar.id_reserva) > 0
+                     ORDER BY 4 DESC 
+    """)
+    livros = cursor.fetchall()
+    cursor.close()
+
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+    pdf.set_font("Arial", style='B', size=16)
+    pdf.cell(200, 10, "Relatorio de Livros", ln=True, align='C')
+
+    pdf.ln(5)  # Espaço entre o título e a linha
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y())  # Linha abaixo do título
+    pdf.ln(5)  # Espaço após a linha
+    pdf.set_font("Arial", size=12)
+
+    for livro in livros:
+        pdf.cell(200, 10, f"Título: {livro[0]}  Data da Sessão: {livro[1]}  Horário: {livro[2]}  Quantidade de Ingressos: {livro[3]}", ln=True)
+
+    contador_livros = len(livros)
+    pdf.ln(10)  # Espaço antes do contador
+    pdf.set_font("Arial", style='B', size=12)
+    pdf.cell(200, 10, f"Total de livros cadastrados: {contador_livros}", ln=True, align='C')
+    pdf_path = "relatorio_livros.pdf"
+    pdf.output(pdf_path)
+
+    return send_file(pdf_path, as_attachment=True, mimetype='application/pdf')
+
 if __name__ == '__main__':
     app.run(debug=True)
