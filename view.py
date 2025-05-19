@@ -1622,5 +1622,6 @@ def painel_admin():
         'vendas_por_sessao': vendas_lista,
         'filmes_mais_bilheteira': filmes_lista
     })
+
 if __name__ == '__main__':
     app.run(debug=True)
