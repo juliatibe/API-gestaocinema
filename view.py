@@ -1560,6 +1560,69 @@ def avaliar_filme():
     finally:
         if cur:
             cur.close()
+#
+#
+# @app.route('/painel-admin', methods=['GET'])
+# def painel_admin():
+#     cur = con.cursor()
+#
+#     # Total arrecadado
+#     cur.execute("""
+#             SELECT sum(r.VALOR_TOTAL)
+#                 FROM SESSOES s
+#                 LEFT JOIN RESERVA r ON r.ID_SESSAO  = s.ID_SESSAO
+#                 WHERE s.DATA_SESSAO BETWEEN ? AND ?
+#                 """, (data_inicial, data_final))
+#
+#     total_arrecadado = cur.fetchone()[0]
+#     if total_arrecadado is None:
+#         total_arrecadado = 0
+#
+#     # Vendas por sessão (nome do filme, horário da sessão, total de ingressos)
+#     cur.execute("""
+#         SELECT f.titulo, s.horario, COUNT(ar.id_reserva) AS ingressos
+#         FROM sessoes s
+#         JOIN filmes f ON s.id_filme = f.id_filme
+#         LEFT JOIN assentos_reservados ar ON s.id_sessao = ar.id_sessao
+#         GROUP BY f.titulo, s.horario
+#     """)
+#     sessoes = cur.fetchall()
+#
+#     vendas_lista = []
+#     for sessao in sessoes:
+#         vendas_lista.append({
+#             'nome': sessao[0],
+#             'sessao': sessao[1],
+#             'ingressos': sessao[2]
+#         })
+#
+#     # Filmes com maior bilheteira
+#     cur.execute("""
+#         SELECT f.titulo, SUM(r.valor_total) AS bilheteira_total
+#         FROM reserva r
+#         JOIN sessoes s ON r.id_sessao = s.id_sessao
+#         JOIN filmes f ON s.id_filme = f.id_filme
+#         GROUP BY f.titulo
+#         ORDER BY bilheteira_total DESC
+#         LIMIT 3
+#     """)
+#     filmes_bilheteira = cur.fetchall()
+#
+#     filmes_lista = []
+#     for filme in filmes_bilheteira:
+#         filmes_lista.append({
+#             'titulo': filme[0],
+#             'bilheteira_total': filme[1]
+#         })
+#
+#     cur.close()
+#
+#     return jsonify({
+#         'mensagem': "Painel Administrativo",
+#         'total_arrecadado': total_arrecadado,
+#         'vendas_por_sessao': vendas_lista,
+#         'filmes_mais_bilheteira': filmes_lista
+#     })
 
 @app.route('/avaliacoes/media', methods=['GET'])
 def media_avaliacoes():
@@ -1604,7 +1667,10 @@ def painel_admin():
 
     cur = con.cursor()
 
+
     # Total arrecadado com filtro opcional de datas
+
+    # Monta a query conforme as datas
     if data_inicial and data_final:
         cur.execute("""
             SELECT r.VALOR_TOTAL
@@ -1650,6 +1716,24 @@ def painel_admin():
             ORDER BY ingressos DESC
         """)
 
+    total_arrecadado = 0
+    for row in cur.fetchall():
+        valor = row[0]
+        if valor is not None:
+            total_arrecadado += float(valor)
+
+    # Consulta de vendas por sessão
+    cur.execute("""
+        SELECT f.titulo, s.DATA_SESSAO, s.horario, COUNT(ar.id_reserva) AS ingressos
+        FROM sessoes s
+        LEFT JOIN filmes f ON s.id_filme = f.id_filme
+        LEFT JOIN RESERVA r ON r.ID_SESSAO = s.ID_SESSAO 
+        LEFT JOIN assentos_reservados ar ON ar.ID_RESERVA = r.ID_RESERVA 
+        GROUP BY f.titulo, s.DATA_SESSAO, s.horario
+        HAVING COUNT(ar.id_reserva) > 0
+        ORDER BY 4 DESC 
+    """)
+
     sessoes = cur.fetchall()
 
     vendas_lista = []
@@ -1692,7 +1776,38 @@ def painel_admin():
         key=lambda x: x[1],
         reverse=True
     )[:3]
+            'data': str(sessao[1]),       # Convertendo para string
+            'horario': str(sessao[2]),    # Convertendo para string
+            'ingressos': sessao[3]
+        })
 
+    # Filmes com maior bilheteira (sem usar SUM no SQL)
+    cur.execute("""
+        SELECT f.titulo, r.valor_total
+        FROM reserva r
+        JOIN sessoes s ON r.id_sessao = s.id_sessao
+        JOIN filmes f ON s.id_filme = f.id_filme
+    """)
+
+    filmes_raw = cur.fetchall()
+
+    # Dicionário para somar manualmente
+    bilheteira_por_filme = {}
+
+    for titulo, valor in filmes_raw:
+        if titulo not in bilheteira_por_filme:
+            bilheteira_por_filme[titulo] = 0
+        if valor is not None:
+            bilheteira_por_filme[titulo] += float(valor)
+
+    # Ordena e pega os top 3
+    filmes_ordenados = sorted(
+        bilheteira_por_filme.items(),
+        key=lambda x: x[1],
+        reverse=True
+    )[:3]
+
+    # Transforma para lista de dicionários
     filmes_lista = []
     for titulo, total in filmes_ordenados:
         filmes_lista.append({
@@ -1718,6 +1833,27 @@ def painel_admin():
         """)
 
     ingressos_vendidos = cur.fetchone()[0] or 0
+
+        # Contagem de ingressos vendidos
+    if data_inicial and data_final:
+        cur.execute("""
+               SELECT COUNT(ar.id_assento)
+               FROM sessoes s
+               LEFT JOIN reserva r ON r.id_sessao = s.id_sessao
+               LEFT JOIN assentos_reservados ar ON ar.id_reserva = r.id_reserva
+               WHERE s.DATA_SESSAO BETWEEN ? AND ?
+           """, (data_inicial, data_final))
+    else:
+        cur.execute("""
+               SELECT COUNT(ar.id_assento)
+               FROM sessoes s
+               LEFT JOIN reserva r ON r.id_sessao = s.id_sessao
+               LEFT JOIN assentos_reservados ar ON ar.id_reserva = r.id_reserva
+           """)
+
+    ingressos_vendidos = cur.fetchone()[0]
+    if ingressos_vendidos is None:
+        ingressos_vendidos = 0
 
     return jsonify({
         'mensagem': "Painel Administrativo",
@@ -1789,7 +1925,40 @@ def gerar_pdf_painel():
 
     return send_file(pdf_path, as_attachment=True, mimetype='application/pdf')
 
+                    SELECT f.titulo, s.DATA_SESSAO, s.horario, COUNT(ar.id_reserva) AS ingressos
+                      FROM sessoes s
+                      LEFT JOIN filmes f ON s.id_filme = f.id_filme
+                      LEFT JOIN RESERVA r ON r.ID_SESSAO = s.ID_SESSAO 
+                      LEFT JOIN assentos_reservados ar ON ar.ID_RESERVA = r.ID_RESERVA 
+                     GROUP BY f.titulo, s.DATA_SESSAO, s.horario
+                    HAVING COUNT(ar.id_reserva) > 0
+                     ORDER BY 4 DESC 
+    """)
+    livros = cursor.fetchall()
+    cursor.close()
 
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+    pdf.set_font("Arial", style='B', size=16)
+    pdf.cell(200, 10, "Relatorio de Livros", ln=True, align='C')
+
+    pdf.ln(5)  # Espaço entre o título e a linha
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y())  # Linha abaixo do título
+    pdf.ln(5)  # Espaço após a linha
+    pdf.set_font("Arial", size=12)
+
+    for livro in livros:
+        pdf.cell(200, 10, f"Título: {livro[0]}  Data da Sessão: {livro[1]}  Horário: {livro[2]}  Quantidade de Ingressos: {livro[3]}", ln=True)
+
+    contador_livros = len(livros)
+    pdf.ln(10)  # Espaço antes do contador
+    pdf.set_font("Arial", style='B', size=12)
+    pdf.cell(200, 10, f"Total de livros cadastrados: {contador_livros}", ln=True, align='C')
+    pdf_path = "relatorio_livros.pdf"
+    pdf.output(pdf_path)
+
+    return send_file(pdf_path, as_attachment=True, mimetype='application/pdf')
 
 if __name__ == '__main__':
     app.run(debug=True)
