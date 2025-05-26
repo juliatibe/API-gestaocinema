@@ -1776,10 +1776,11 @@ def painel_admin():
         key=lambda x: x[1],
         reverse=True
     )[:3]
-            'data': str(sessao[1]),       # Convertendo para string
-            'horario': str(sessao[2]),    # Convertendo para string
-            'ingressos': sessao[3]
-        })
+    return {
+        'data': str(sessao[1]),
+        'horario': str(sessao[2]),
+        'ingressos': sessao[3]
+    }
 
     # Filmes com maior bilheteira (sem usar SUM no SQL)
     cur.execute("""
@@ -1923,17 +1924,19 @@ def gerar_pdf_painel():
     pdf_path = "relatorio_venda_sessoes.pdf"
     pdf.output(pdf_path)
 
+    cursor.execute("""
+        SELECT f.titulo, s.DATA_SESSAO, s.horario, COUNT(ar.id_reserva) AS ingressos
+          FROM sessoes s
+          LEFT JOIN filmes f ON s.id_filme = f.id_filme
+          LEFT JOIN RESERVA r ON r.ID_SESSAO = s.ID_SESSAO 
+          LEFT JOIN assentos_reservados ar ON ar.ID_RESERVA = r.ID_RESERVA 
+         GROUP BY f.titulo, s.DATA_SESSAO, s.horario
+        HAVING COUNT(ar.id_reserva) > 0
+         ORDER BY 4 DESC
+    """)
+
     return send_file(pdf_path, as_attachment=True, mimetype='application/pdf')
 
-                    SELECT f.titulo, s.DATA_SESSAO, s.horario, COUNT(ar.id_reserva) AS ingressos
-                      FROM sessoes s
-                      LEFT JOIN filmes f ON s.id_filme = f.id_filme
-                      LEFT JOIN RESERVA r ON r.ID_SESSAO = s.ID_SESSAO 
-                      LEFT JOIN assentos_reservados ar ON ar.ID_RESERVA = r.ID_RESERVA 
-                     GROUP BY f.titulo, s.DATA_SESSAO, s.horario
-                    HAVING COUNT(ar.id_reserva) > 0
-                     ORDER BY 4 DESC 
-    """)
     livros = cursor.fetchall()
     cursor.close()
 
